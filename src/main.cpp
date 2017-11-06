@@ -42,10 +42,8 @@ void GaussLegendreQuadrature(double x1, double x2, double x[], double w[], int n
 				p1 =1.0;
 				p2 =0.0;
 
-				//
 				// loop up recurrence relation to get the
 				// Legendre polynomial evaluated at x
-				//
 
 				for(j = 1; j <= n; j++) {
 					p3 = p2;
@@ -79,7 +77,7 @@ void GaussLegendreQuadrature(double x1, double x2, double x[], double w[], int n
 //polynomials.
 //  Input: number of mesh points desired (n)
 //  Output: vector of mesh points
-std::vector<MeshPoint> setup_mesh(double n){
+std::vector<MeshPoint> SetupMesh(double n){
   std::vector<MeshPoint> mesh;
 
 	std::vector<double> x;
@@ -93,7 +91,7 @@ std::vector<MeshPoint> setup_mesh(double n){
   //it can be 200 (hbarc = 197 MeVfm)
   double t;//cache value for use in both remappings
 
-  const double C = 1;//determines units of k 
+  const double C = 197;//determines units of k 
   const double PI = 3.14159265359;
   for (int i = 0; i < n; i++){
     t = PI/4. * (1+x[i]);
@@ -109,20 +107,77 @@ std::vector<MeshPoint> setup_mesh(double n){
   return mesh;
 }
 
-double CalculatePotential(){
+double CalculatePotential(double kp, double k){
   double potential = 0;
+  const double Va = -10.463;//MeV
+  const double Vb = -1650.6;//MeV
+  const double Vc = 6484.3;//MeV
+
+  const double A = 1;
+  const double B = 4;
+  const double C = 7;
+
+  double kpplusk2 = pow(kp+k,2.);
+  double kpminusk2 = pow(kp-k,2.);
+  potential += Va/(4.*kp*k) * log((kpplusk2+pow(A,2.))/(kpminusk2+pow(A,2.)));
+  potential += Vb/(4.*kp*k) * log((kpplusk2+pow(B,2.))/(kpminusk2+pow(B,2.)));
+  potential += Vc/(4.*kp*k) * log((kpplusk2+pow(C,2.))/(kpminusk2+pow(C,2.)));
+
   return potential;
 }
 int main(int argc, char **argv){
 
-	std::string USAGE("lsesolver [number of mesh points]\n");
+    std::string USAGE("LSESolver [number of mesh points]\n");
 	if (argc < 2) {
-		std::cout << USAGE;
+        std::cout << USAGE;
 		return -1;
-	}
+    }
+    int n = std::strtoi(argv[2]);
 
-  //Create mesh for integration
-  std::vector<MeshPoint> mesh = setup_mesh(n);
+    //Create mesh for integration
+    std::vector<MeshPoint> mesh = SetupMesh(n);
 
+    arma::mat potential(n+1, n+1);
+    arma::mat A(n+1, n+1);
+
+    const double K0 = 0;
+
+    
+    const double M = 938.//MeV
+    double u_N_sum = 0;
+    for (int i = 0; i < n+1; i++){
+        u_N_sum += mesh.at(i).w*pow(K0,2.)/(pow(K0,2.)-pow(mesh.at(i).k,2.));
+    }
+    double u_N = -2.*PI*u_N_sum*M;
+    potential(0,0) = potential(n+1,n+1) = CalculatePotential(k0,k0);
+    for (int i = 0; i < n+1; i++){
+        for (int j = i; j < n+1; j++){
+            if (i == n && j ==n){
+                potential(n, n) = CalculatePotential(K0, K0); 
+            }
+            else if (j == n){
+                potential(i, n) = CalculatePotential(mesh.at(i).k, K0); 
+            }
+            else{
+                potential(i,j) = CalculatePotential(mesh.at(i).k,
+                                                    mesh.at(j).k);
+            }
+            if (i == j){
+                A(i,j) += 1;
+            }
+
+            if (j == n){
+                A(i,n) -= potential(i,j)*u_N;
+            }
+            else{
+                uj = 2.*M/PI * mesh.at(j).w*pow(mesh.at(j).k,2.)/(pow(K0,2.)-pow(mesh.at(j).k,2.));
+                A(i,j) -= potential(i,j)*uj
+            }
+        }
+
+
+    }
+
+    
 
 }
