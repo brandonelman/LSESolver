@@ -3,13 +3,18 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <armadillo>
+//#include <limits>
 
 
+#define ZERO 10E-10
 
 struct MeshPoint{
 	double k;//position
 	double w;//weight
-}
+
+  MeshPoint(double ik, double iw) : k(ik), w(iw) {}
+};
 
 //NOTE: From IntegrationExample by Morten/Scott; Want to rewrite this
 //The function GaussLegendreQuadrature() takes the lower and upper limits of 
@@ -85,7 +90,7 @@ std::vector<MeshPoint> SetupMesh(double n){
 
 	x.resize(n);
 	w.resize(n);
-  GaussLegendreQuadrature(-1,1, &x[0], &w[0], n)
+  GaussLegendreQuadrature(-1,1, &x[0], &w[0], n);
   //remap weights from interval [-1,1] to [0,infinity]
   //Note C can be either 1 (corresponds to k in 1/fm) or 
   //it can be 200 (hbarc = 197 MeVfm)
@@ -127,57 +132,67 @@ double CalculatePotential(double kp, double k){
 }
 int main(int argc, char **argv){
 
-    std::string USAGE("LSESolver [number of mesh points]\n");
-	if (argc < 2) {
+    std::string USAGE("LSESolver [number of mesh points] [value of E]\n");
+	if (argc < 3) {
         std::cout << USAGE;
 		return -1;
     }
-    int n = std::strtoi(argv[2]);
+    int n = std::stoi(argv[1]);
+    double E = std::stol(argv[2]);
 
     //Create mesh for integration
-    std::vector<MeshPoint> mesh = SetupMesh(n);
+    std::vector<MeshPoint> mesh = SetupMesh(n+1);
 
-    arma::mat potential(n+1, n+1);
-    arma::mat A(n+1, n+1);
+    arma::mat potential(n+1, n+1, arma::fill::zeros);
+    arma::mat A(n+1, n+1, arma::fill::zeros);
 
-    const double K0 = 0;
 
     
-    const double M = 938.//MeV
+    const double PI = 3.14159265359;
+    const double M = 938.;//MeV
+    double k0 = sqrt(M*E);
     double u_N_sum = 0;
     for (int i = 0; i < n+1; i++){
-        u_N_sum += mesh.at(i).w*pow(K0,2.)/(pow(K0,2.)-pow(mesh.at(i).k,2.));
+        u_N_sum += mesh.at(i).w*pow(k0,2.)/(pow(k0,2.)-pow(mesh.at(i).k,2.));
     }
     double u_N = -2.*PI*u_N_sum*M;
-    potential(0,0) = potential(n+1,n+1) = CalculatePotential(k0,k0);
+    double uj = 0;
     for (int i = 0; i < n+1; i++){
         for (int j = i; j < n+1; j++){
             if (i == n && j ==n){
-                potential(n, n) = CalculatePotential(K0, K0); 
+                potential(n, n) = CalculatePotential(k0, k0); 
             }
             else if (j == n){
-                potential(i, n) = CalculatePotential(mesh.at(i).k, K0); 
+                potential(i, n) = CalculatePotential(mesh.at(i).k, k0); 
             }
             else{
                 potential(i,j) = CalculatePotential(mesh.at(i).k,
                                                     mesh.at(j).k);
             }
-            if (i == j){
-                A(i,j) += 1;
-            }
-
-            if (j == n){
-                A(i,n) -= potential(i,j)*u_N;
-            }
-            else{
-                uj = 2.*M/PI * mesh.at(j).w*pow(mesh.at(j).k,2.)/(pow(K0,2.)-pow(mesh.at(j).k,2.));
-                A(i,j) -= potential(i,j)*uj
-            }
         }
-
-
     }
 
+    for (int i = 0; i < n + 1; i++){
+      for (int j = 0; j < n+1; j++){
+        if (i == j){
+          A(i,j) += 1;
+        }
+
+        if (j == n){
+          A(i,n) -= potential(i,j)*u_N;
+        }
+        else{
+          uj = 2.*M/PI * mesh.at(j).w*pow(mesh.at(j).k,2.)/(pow(k0,2.)-pow(mesh.at(j).k,2.));
+          A(i,j) -= potential(i,j)*uj;
+        }
+      }//loop over j
+    }//loop over i
+
+    potential = arma::symmatu(potential);
     
+    arma::mat r_matrix = inv(A)*potential;
+
+    double phase_shift = atan2(-M*k0*r_matrix(n,n),1.);
+    std::cout << "Phase shift: " << phase_shift*180./PI << "\n";
 
 }
