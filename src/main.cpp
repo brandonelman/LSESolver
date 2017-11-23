@@ -16,12 +16,10 @@ struct MeshPoint{
   MeshPoint(double ik, double iw) : k(ik), w(iw) {}
 };
 
-//NOTE: From IntegrationExample by Morten/Scott; Want to rewrite this
 //The function GaussLegendreQuadrature() takes the lower and upper limits of 
 //integration x1, x2, calculates and return the abcissas in x[0,...,n - 1] 
 //and the weights in w[0,...,n - 1]
 //of length n of the Gauss--Legendre n--point quadrature formulae.
- 
 void GaussLegendreQuadrature(double x1, double x2, double x[], double w[], int n) {
    int          m,j,i;
    double       z1,z,xm,xl,pp,p3,p2,p1;
@@ -151,7 +149,8 @@ double CalculatePotential(const double kp, const double k, const std::string &po
   return potential;
 }
 
-//Ensure mesh does not contain values close to k0 value 
+//Ensure mesh does not contain values close to k0 value, which would cause
+//singular values to appear
 const int VerifyMesh(double k0, const std::vector<MeshPoint> &mesh){
   const double THRESHOLD = 0.1;
   for (auto &mp : mesh){
@@ -164,6 +163,9 @@ const int VerifyMesh(double k0, const std::vector<MeshPoint> &mesh){
   return 0;
 }
 
+//Build potential matrix based on "pot_type", which can either be the
+//parametrized Yukawa type potential (if pot_type is "yukawa"), or a square
+//well (if pot_type is "well")
 void BuildPotentialMatrix(arma::mat &potential, const std::vector<MeshPoint> &mesh, const double k0, const std::string &pot_type){
   const size_t n = mesh.size();
   for (int i = 0; i < n+1; i++){
@@ -182,8 +184,8 @@ void BuildPotentialMatrix(arma::mat &potential, const std::vector<MeshPoint> &me
   potential = arma::symmatu(potential);
 }
 
+//Build A matrix defined in notes
 void BuildAMatrix(arma::mat &A, const arma::mat &potential, const std::vector<MeshPoint> &mesh, const double k0){
-
   const double PI = 3.14159265359;
   const double M = 938.;//MeV
   const size_t n = mesh.size();
@@ -212,13 +214,26 @@ void BuildAMatrix(arma::mat &A, const arma::mat &potential, const std::vector<Me
 
 int main(int argc, char **argv){
 
-  std::string USAGE("LSESolver [number of mesh points] [value of E] [well or yukawa]\n");
+  std::string USAGE("LSESolver [number of mesh points] [value of E in Lab units] [well or yukawa] [verbose, 0 or 1]\n");
+  bool verbose;
   if (argc < 4) {
     std::cout << USAGE;
     return -1;
   }
+  if (argc == 4){
+    verbose = true;
+  }
+  if (argc == 5){
+    verbose = std::stoi(argv[4]);
+  }
   int n = std::stoi(argv[1]);
-  double E = std::stol(argv[2]);
+  const double M = 938.;//MeV
+  const double HBARC = 197.;//MeV*fm
+  //Note: input E should be in  Lab Frame
+  double E_lab = std::stol(argv[2]);
+  //Formula taken from Scott to convert E_lab to k in center-of-mass
+  double k0 = sqrt(E_lab/83.) * HBARC; //Multiplied by 197 to convert from 1/fm to MeV
+  double E_cm =  E_lab/(83.*M)*pow(HBARC,2.);
   std::string pot_type(argv[3]);
 
   std::transform(pot_type.begin(), pot_type.end(), pot_type.begin(), ::tolower);
@@ -227,9 +242,8 @@ int main(int argc, char **argv){
   //Create mesh for integration
   std::vector<MeshPoint> mesh = SetupMesh(n);
 
-  const double M = 938.;//MeV
-  double k0 = sqrt(M*E);
-
+  //The trick for solving the principal value problem requires k0 to not be in
+  //mesh.
   if (VerifyMesh(k0, mesh) != 0){
     std::cout << "Failed to verify mesh\n";
     return -1;
@@ -241,14 +255,25 @@ int main(int argc, char **argv){
   BuildAMatrix(A, potential, mesh, k0);
   arma::mat r_matrix = inv(A)*potential;
 
-  double phase_shift = atan(-M*k0*r_matrix(n,n));
   const double PI = 3.14159265359;
-  std::cout << "Phase shift: " << phase_shift*180./PI << " degrees\n";
-
-  if (pot_type == "well"){
-    double V0 = 50.;//MeV
-    double R = 0.01;//1/MeV
-    double expected_phase_shift = atan(sqrt(E/(E+V0)) * tan(R*sqrt(M*(E+V0)))) - R*sqrt(M*E);
-    std::cout << "Expected spherical well phase shift: " << expected_phase_shift*180./PI << std::endl;
+  double phase_shift = atan(-M*k0*r_matrix(n,n))*180./PI;
+  if (pot_type == "well" && phase_shift < 0){
+    phase_shift += 180;
   }
+  if (verbose){
+    std::cout << "Phase shift: " << phase_shift << " degrees\n";
+    if (pot_type == "well"){
+      double V0 = 50.;//MeV
+      double R = 0.01;//1/MeV
+      double expected_phase_shift = (atan(sqrt(E_cm/(E_cm+V0)) * tan(R*sqrt(M*(E_cm+V0)))) - R*sqrt(M*E_cm))*180./PI;
+      if (expected_phase_shift < 0){
+        expected_phase_shift += 180;
+      }
+      std::cout << "Expected spherical well phase shift: " << expected_phase_shift << std::endl;
+    }
+  }
+  else{
+    std::cout << E_lab << " " << phase_shift << "\n";
+  }
+  
 }
