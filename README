@@ -18,3 +18,5 @@ Must have armadillo installed. To run the code, the input is as fellow:
 If verbose (1) printing is chosen, it will print a full sentence and extra
 information for the well potential. If non-verbose (0) is chosen, it will only
 print out lab energy and the phase shift in degrees.
+
+Final report is stored in doc/ folder.
