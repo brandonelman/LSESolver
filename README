@@ -1,3 +1,20 @@
 # LSESolver: Solving the Lippman-Schwinger Equation 
 
 Project 1 in Nuclear Forces PHY989
+We provide results for the singles S phase shift by solving the
+Lippman-Schwinger equation and the variable phase approach (see  
+VPAScattering_elman_longfellow_votaw.nb).
+
+To make the executable for solving the Lippman-Schwinger equation,
+do:
+
+make 
+
+Must have armadillo installed. To run the code, the input is as fellow:
+
+./lsesolver [# MESH POINTS] [LAB ENERGY (MEV)] ["well" or "yukawa" for potential] [print verbose (1) or non-verbose (0)]
+
+
+If verbose (1) printing is chosen, it will print a full sentence and extra
+information for the well potential. If non-verbose (0) is chosen, it will only
+print out lab energy and the phase shift in degrees.
