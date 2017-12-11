@@ -15,6 +15,15 @@ struct MeshPoint{
 
   MeshPoint(double ik, double iw) : k(ik), w(iw) {}
 };
+struct LowEnergyConstants{
+	double c0;
+	double c2;
+	double c4;
+	double c4p;
+
+  LowEnergyConstants(double ic0, double ic2, double ic4, double ic4p) : c0(ic0), c2(ic2), c4(ic4), c4p(ic4p) {}
+};
+
 
 //The function GaussLegendreQuadrature() takes the lower and upper limits of 
 //integration x1, x2, calculates and return the abcissas in x[0,...,n - 1] 
@@ -110,6 +119,32 @@ std::vector<MeshPoint> SetupMesh(double n){
   return mesh;
 }
 
+double CalculatePotential(const double kp, const double k, const std::string &pot_type, LowEnergyConstants lec){
+  double potential = 0;
+  const double PI = 3.14159265359;
+
+  if (pot_type == "eft"){
+    const double CUTOFF = 138;//MeV
+
+    double regulator_p = exp(-pow(kp,4.)/pow(CUTOFF,4.));//for kprime
+    double regulator = exp(-pow(k,4.)/pow(CUTOFF,4.));//for k
+    
+    potential += lec.c0;
+    potential += lec.c2*(pow(k,2.)+pow(kp,2.));
+    potential += lec.c4*(pow(k,4.)+pow(kp,4.));
+    potential += lec.c4p*pow(k*kp,2.);
+    
+    return regulator_p * potential * regulator;
+  }
+  else{
+    std::cout << "Invalid potential type! Must be EFT for this many parameters!\n";
+    return sqrt(-1);
+  }
+
+  return potential;
+}
+
+
 double CalculatePotential(const double kp, const double k, const std::string &pot_type){
   double potential = 0;
   const double PI = 3.14159265359;
@@ -141,6 +176,7 @@ double CalculatePotential(const double kp, const double k, const std::string &po
       potential = V0/(2.*k*kp) * (sin((k+kp)*R)/(k+kp) - sin((k-kp)*R)/(k-kp));
     }
   }
+  
   else{
     std::cout << "Invalid potential type!\n";
     return sqrt(-1);
@@ -166,6 +202,25 @@ const int VerifyMesh(double k0, const std::vector<MeshPoint> &mesh){
 //Build potential matrix based on "pot_type", which can either be the
 //parametrized Yukawa type potential (if pot_type is "yukawa"), or a square
 //well (if pot_type is "well")
+
+void BuildPotentialMatrix(arma::mat &potential, const std::vector<MeshPoint> &mesh, const double k0, const std::string &pot_type, LowEnergyConstants lec){
+  const size_t n = mesh.size();
+  for (int i = 0; i < n+1; i++){
+    for (int j = i; j < n+1; j++){
+      if (i == n && j ==n){
+        potential(n, n) = CalculatePotential(k0, k0, pot_type, lec); 
+      }
+      else if (j == n){
+        potential(i, n) = CalculatePotential(mesh.at(i).k, k0, pot_type, lec); 
+      }
+      else{
+        potential(i,j) = CalculatePotential(mesh.at(i).k, mesh.at(j).k, pot_type, lec);
+      }
+    }
+  }
+  potential = arma::symmatu(potential);
+}
+
 void BuildPotentialMatrix(arma::mat &potential, const std::vector<MeshPoint> &mesh, const double k0, const std::string &pot_type){
   const size_t n = mesh.size();
   for (int i = 0; i < n+1; i++){
@@ -226,8 +281,10 @@ int main(int argc, char **argv){
   if (argc == 5){
     verbose = std::stoi(argv[4]);
   }
+
   int n = std::stoi(argv[1]);
-  const double M = 938.;//MeV
+  const double M = 938.;//nucleon mass in MeV
+  const double MPI = 938.;//pion mass in MeV 
   const double HBARC = 197.;//MeV*fm
   //Note: input E should be in  Lab Frame
   double E_lab = std::stol(argv[2]);
@@ -242,6 +299,7 @@ int main(int argc, char **argv){
   //Create mesh for integration
   std::vector<MeshPoint> mesh = SetupMesh(n);
 
+
   //The trick for solving the principal value problem requires k0 to not be in
   //mesh.
   if (VerifyMesh(k0, mesh) != 0){
@@ -251,29 +309,109 @@ int main(int argc, char **argv){
 
   arma::mat potential(n+1, n+1, arma::fill::zeros);
   arma::mat A(n+1, n+1, arma::fill::zeros);
-  BuildPotentialMatrix(potential, mesh, k0, pot_type);
-  BuildAMatrix(A, potential, mesh, k0);
-  arma::mat r_matrix = inv(A)*potential;
 
   const double PI = 3.14159265359;
-  double phase_shift = atan(-M*k0*r_matrix(n,n))*180./PI;
-  if (pot_type == "well" && phase_shift < 0){
-    phase_shift += 180;
-  }
-  if (verbose){
-    std::cout << "Phase shift: " << phase_shift << " degrees\n";
-    if (pot_type == "well"){
-      double V0 = 50.;//MeV
-      double R = 0.01;//1/MeV
-      double expected_phase_shift = (atan(sqrt(E_cm/(E_cm+V0)) * tan(R*sqrt(M*(E_cm+V0)))) - R*sqrt(M*E_cm))*180./PI;
-      if (expected_phase_shift < 0){
-        expected_phase_shift += 180;
+
+  if (pot_type == "eft"){
+
+    //Need to calculate expected phase shift for fitting purposes 
+    std::cout << "Calculating phase shift to compare to...\n";
+    BuildPotentialMatrix(potential, mesh, k0, "yukawa");
+    BuildAMatrix(A, potential, mesh, k0);
+    arma::mat r_matrix = inv(A)*potential;
+    double yukawa_phase_shift = atan(-M*k0*r_matrix(n,n))*180./PI;
+
+    r_matrix.zeros();
+    A.zeros();
+    potential.zeros();
+
+
+//  const double INITIAL_C0_VAL = -1.40891e-05;//-213./(M*MPI);
+    std::cout << "Setting up initial search values...\n";
+//  std::vector<double> c0_vals  = {1e-07, 0.8e-07, 1.2e-07, 0.9e-07, 1.1e-07};
+//  std::vector<double> c2_vals  = {1e-06, 0.8e-06, 1.2e-06, 0.9e-06, 1.1e-06, 1.3e-06, 1.4e-06};
+//  std::vector<double> c4_vals  = {10000, 10500, 9500, 9000, 11000};
+//  std::vector<double> c4p_vals = {0.001, 0.0011, 0.0013, 0.0014, 0.0015, 0.0005, 0.0006, 0.0007, 0.0009, 0.0008, 0.0012};
+    std::vector<double> c0_vals  = {1.1e-07};
+    std::vector<double> c2_vals  = {8e-07};
+    std::vector<double> c4_vals  = {10500};
+    std::vector<double> c4p_vals = {0.0014};
+
+
+    std::vector<LowEnergyConstants> lec_search;//low energy constants
+    std::vector<double> phase_shifts;
+
+    std::vector<LowEnergyConstants> lecs;
+    for (auto &c0 : c0_vals){
+      for (auto &c2 : c2_vals){
+        for (auto &c4 : c4_vals){
+          for (auto &c4p : c4p_vals){
+            lecs.push_back( LowEnergyConstants(c0, c2, c4, c4p) );
+          }
+        }
       }
-      std::cout << "Expected spherical well phase shift: " << expected_phase_shift << std::endl;
     }
-  }
+
+    double cur_best_eft_phase_shift = 10000;
+    LowEnergyConstants best_lecs(0,0,0,0);
+
+    std::cout << "Searching....\n";
+    for (auto &lec : lecs){
+//    if (verbose){
+//      std::cout << "Using set: " << lec.c0 << " " << lec.c2 << " " << lec.c4 
+//        << " " << lec.c4p << "\n";
+//    }
+      BuildPotentialMatrix(potential, mesh, k0, pot_type, lec);
+      BuildAMatrix(A, potential, mesh, k0);
+      r_matrix = inv(A)*potential;
+      double phase_shift = atan(-M*k0*r_matrix(n,n))*180./PI;
+//    if (verbose){
+//      std::cout << "Phase shift: " << phase_shift << " degrees\n";
+//    }
+//    std::cout << "Best val: " << abs(cur_best_eft_phase_shift-yukawa_phase_shift) 
+//              << " and Current Val: " << abs(phase_shift-yukawa_phase_shift) << "\n";
+      if (abs(phase_shift - yukawa_phase_shift) < abs(cur_best_eft_phase_shift-yukawa_phase_shift)){
+        best_lecs.c0 = lec.c0;
+        best_lecs.c2 = lec.c2;
+        best_lecs.c4 = lec.c4;
+        best_lecs.c4p = lec.c4p;
+        cur_best_eft_phase_shift = phase_shift;
+      //std::cout <<  E_lab << " "  << best_lecs.c0 << " " << best_lecs.c2 
+      //  << " " << best_lecs.c4 << " " << best_lecs.c4p << " with phase shift " 
+      //  << phase_shift << " degrees\n";
+      }
+      std::cout << E_lab << " "  << lec.c0 << " " << lec.c2 << " " << lec.c4 
+                << " " << lec.c4p << " " << phase_shift << "\n";
+      r_matrix.zeros();
+      A.zeros();
+      potential.zeros();
+    }//loop over LECs
+  }//potential == eft
+
   else{
-    std::cout << E_lab << " " << phase_shift << "\n";
-  }
-  
+    BuildPotentialMatrix(potential, mesh, k0, pot_type);
+    BuildAMatrix(A, potential, mesh, k0);
+    arma::mat r_matrix = inv(A)*potential;
+
+    double phase_shift = atan(-M*k0*r_matrix(n,n))*180./PI;
+
+    if (pot_type == "well" && phase_shift < 0){
+      phase_shift += 180;
+    }
+    if (verbose){
+      std::cout << "Phase shift: " << phase_shift << " degrees\n";
+      if (pot_type == "well"){
+        double V0 = 50.;//MeV
+        double R = 0.01;//1/MeV
+        double expected_phase_shift = (atan(sqrt(E_cm/(E_cm+V0)) * tan(R*sqrt(M*(E_cm+V0)))) - R*sqrt(M*E_cm))*180./PI;
+        if (expected_phase_shift < 0){
+          expected_phase_shift += 180;
+        }
+        std::cout << "Expected spherical well phase shift: " << expected_phase_shift << std::endl;
+      }//if well
+    }//if verbose
+    else{
+      std::cout << E_lab << " " << phase_shift << "\n";
+    }//not verbose
+  }//pot_type != eft
 }
