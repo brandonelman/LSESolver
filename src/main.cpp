@@ -283,7 +283,7 @@ void BuildAMatrix(arma::mat &A, const arma::mat &potential, const std::vector<Me
 
 int main(int argc, char **argv){
 
-  std::string USAGE("LSESolver [number of mesh points] [value of E in Lab units] [well,yukawa,nopieft] [order for eft] [verbose, 0 or 1]\n");
+  std::string USAGE("LSESolver [number of mesh points] [value of E in Lab units] [well,yukawa,nopieft,pieft] [order for eft] [cutoff] [verbose, 0 or 1]\n");
   bool verbose;
   if (argc < 4) {
     std::cout << USAGE;
