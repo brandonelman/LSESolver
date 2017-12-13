@@ -348,13 +348,17 @@ int main(int argc, char **argv){
 
     if (order == "lo"){
       //parameters for breakdown  = 138
-//      c0_vals  = {-1.48091e-05};
+      if (pot_type == "nopieft"){
+        c0_vals  = {-1.48091e-05};
+      }
      
      // paramaters for cutoff = 983
 //    c0_vals  = {-2.08e-06};
 
       //parameters for breakdown = 983 pioneft
-      c0_vals = {-1.65e-06};
+      if (pot_type == "pieft"){
+        c0_vals = {-1.65e-06};
+      }
       c2_vals  = {0};
       c4_vals  = {0};
       c4p_vals = {0};
@@ -367,8 +371,10 @@ int main(int argc, char **argv){
 //    c2_vals  = {3e-07};
 
       //parameters for breakdown  = 138
-//    c0_vals  = {1380};
-//    c2_vals  = {2.85e-05};
+      if (pot_type == "nopieft"){
+      c0_vals  = {1380};
+      c2_vals  = {2.85e-05};
+      }
 
       //paramets for breakdown = 69
 //    c0_vals  = {550};
@@ -381,18 +387,22 @@ int main(int argc, char **argv){
 //    c2_vals  = {1e-07};
 
       //parameters for breakdown = 983 pioneft
-      c0_vals  = {2.4e5};
-      c2_vals  = {2.75e-06};
+      if (pot_type == "pieft"){
+        c0_vals  = {2.4e5};
+        c2_vals  = {2.75e-06};
+      }
       c4_vals  = {0};
       c4p_vals = {0};
     }//nlo
 
     if (order == "nnlo"){
       //parameters for breakdown  = 138
-//    c0_vals  = {6e-08};
-//    c2_vals  = {1.2e-06};
-//    c4_vals  = {6000};
-//    c4p_vals = {0.0011};
+      if (pot_type == "nopieft"){
+        c0_vals  = {6e-08};
+        c2_vals  = {1.2e-06};
+        c4_vals  = {6000};
+        c4p_vals = {0.0011};
+      }
       //parameters for breakdown = 983
 //    c0_vals  = {9e-06};
 //    c2_vals  = {3e-05};
@@ -400,10 +410,12 @@ int main(int argc, char **argv){
 //    c4p_vals = {0};
 
       //parameters for breakdown = 983 pioneft
-      c0_vals  = {5e-08};
-      c2_vals  = {1.05e-06};
-      c4_vals  = {3.054e6};
-      c4p_vals = {0};
+      if (pot_type == "pieft"){
+        c0_vals  = {5e-08};
+        c2_vals  = {1.05e-06};
+        c4_vals  = {3.054e6};
+        c4p_vals = {0};
+      }
     }
 
     std::vector<LowEnergyConstants> lec_search;//low energy constants
