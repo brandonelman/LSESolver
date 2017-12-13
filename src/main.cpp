@@ -119,15 +119,15 @@ std::vector<MeshPoint> SetupMesh(double n){
   return mesh;
 }
 
-double CalculatePotential(const double kp, const double k, const std::string &pot_type, LowEnergyConstants lec){
+double CalculatePotential(const double kp, const double k, const std::string &pot_type, LowEnergyConstants lec, double cutoff){
   double potential = 0;
   const double PI = 3.14159265359;
 
-  if (pot_type == "eft"){
-    const double CUTOFF = 138;//MeV
+  if (pot_type == "nopieft"){
+//    const double CUTOFF = 138;//MeV
 
-    double regulator_p = exp(-pow(kp,4.)/pow(CUTOFF,4.));//for kprime
-    double regulator = exp(-pow(k,4.)/pow(CUTOFF,4.));//for k
+    double regulator_p = exp(-pow(kp,4.)/pow(cutoff,4.));//for kprime
+    double regulator = exp(-pow(k,4.)/pow(cutoff,4.));//for k
     
     potential += lec.c0;
     potential += lec.c2*(pow(k,2.)+pow(kp,2.));
@@ -136,12 +136,26 @@ double CalculatePotential(const double kp, const double k, const std::string &po
     
     return regulator_p * potential * regulator;
   }
+  else if (pot_type == "pieft"){
+    const double A = 1;
+    const double MU = 138; //Pion Mass, MeV
+    const double Va = -10.463;//MeV
+    double regulator_p = exp(-pow(kp,4.)/pow(cutoff,4.));//for kprime
+    double regulator = exp(-pow(k,4.)/pow(cutoff,4.));//for k
+    potential += lec.c0;
+    potential += lec.c2*(pow(k,2.)+pow(kp,2.));
+    potential += lec.c4*(pow(k,4.)+pow(kp,4.));
+    potential += lec.c4p*pow(k*kp,2.);
+    double kpplusk2 = pow(kp+k,2.);
+    double kpminusk2 = pow(kp-k,2.);
+    potential += Va/(4.*MU*kp*k) * log( (kpplusk2+pow(A*MU,2.))/(kpminusk2+pow(A*MU,2.)) );
+   
+    return regulator_p * potential * regulator;
+  }
   else{
     std::cout << "Invalid potential type! Must be EFT for this many parameters!\n";
     return sqrt(-1);
   }
-
-  return potential;
 }
 
 
@@ -190,9 +204,9 @@ double CalculatePotential(const double kp, const double k, const std::string &po
 const int VerifyMesh(double k0, const std::vector<MeshPoint> &mesh){
   const double THRESHOLD = 0.1;
   for (auto &mp : mesh){
-    if(abs(mp.k - k0) < THRESHOLD){
-      std::cout << "Difference between mesh point (" << mp.k 
-                <<") and k0 ("<<k0<<") is below threshold!\n";
+    if(fabs(mp.k - k0) < THRESHOLD){
+      std::cout << "Difference (" << fabs(mp.k-k0) << ") between mesh point (" << mp.k 
+                <<") and k0 ("<<k0<<") is below threshold (" << THRESHOLD <<")!\n";
       return -1;
     }
   }
@@ -203,18 +217,18 @@ const int VerifyMesh(double k0, const std::vector<MeshPoint> &mesh){
 //parametrized Yukawa type potential (if pot_type is "yukawa"), or a square
 //well (if pot_type is "well")
 
-void BuildPotentialMatrix(arma::mat &potential, const std::vector<MeshPoint> &mesh, const double k0, const std::string &pot_type, LowEnergyConstants lec){
+void BuildPotentialMatrix(arma::mat &potential, const std::vector<MeshPoint> &mesh, const double k0, const std::string &pot_type, LowEnergyConstants lec, double cutoff){
   const size_t n = mesh.size();
   for (int i = 0; i < n+1; i++){
     for (int j = i; j < n+1; j++){
       if (i == n && j ==n){
-        potential(n, n) = CalculatePotential(k0, k0, pot_type, lec); 
+        potential(n, n) = CalculatePotential(k0, k0, pot_type, lec, cutoff); 
       }
       else if (j == n){
-        potential(i, n) = CalculatePotential(mesh.at(i).k, k0, pot_type, lec); 
+        potential(i, n) = CalculatePotential(mesh.at(i).k, k0, pot_type, lec, cutoff); 
       }
       else{
-        potential(i,j) = CalculatePotential(mesh.at(i).k, mesh.at(j).k, pot_type, lec);
+        potential(i,j) = CalculatePotential(mesh.at(i).k, mesh.at(j).k, pot_type, lec, cutoff);
       }
     }
   }
@@ -269,17 +283,17 @@ void BuildAMatrix(arma::mat &A, const arma::mat &potential, const std::vector<Me
 
 int main(int argc, char **argv){
 
-  std::string USAGE("LSESolver [number of mesh points] [value of E in Lab units] [well or yukawa] [verbose, 0 or 1]\n");
+  std::string USAGE("LSESolver [number of mesh points] [value of E in Lab units] [well,yukawa,nopieft] [order for eft] [verbose, 0 or 1]\n");
   bool verbose;
   if (argc < 4) {
     std::cout << USAGE;
     return -1;
   }
-  if (argc == 4){
+  if (argc == 6){
     verbose = true;
   }
-  if (argc == 5){
-    verbose = std::stoi(argv[4]);
+  if (argc == 7){
+    verbose = std::stoi(argv[6]);
   }
 
   int n = std::stoi(argv[1]);
@@ -287,11 +301,14 @@ int main(int argc, char **argv){
   const double MPI = 938.;//pion mass in MeV 
   const double HBARC = 197.;//MeV*fm
   //Note: input E should be in  Lab Frame
-  double E_lab = std::stol(argv[2]);
+  double E_lab = std::stod(argv[2]);
   //Formula taken from Scott to convert E_lab to k in center-of-mass
   double k0 = sqrt(E_lab/83.) * HBARC; //Multiplied by 197 to convert from 1/fm to MeV
   double E_cm =  E_lab/(83.*M)*pow(HBARC,2.);
   std::string pot_type(argv[3]);
+  //lo,nlo,nnlo
+  std::string order(argv[4]);
+  double cutoff = std::stod(argv[5]);
 
   std::transform(pot_type.begin(), pot_type.end(), pot_type.begin(), ::tolower);
 
@@ -312,10 +329,9 @@ int main(int argc, char **argv){
 
   const double PI = 3.14159265359;
 
-  if (pot_type == "eft"){
+  if (pot_type == "nopieft" || pot_type == "pieft"){
 
     //Need to calculate expected phase shift for fitting purposes 
-    std::cout << "Calculating phase shift to compare to...\n";
     BuildPotentialMatrix(potential, mesh, k0, "yukawa");
     BuildAMatrix(A, potential, mesh, k0);
     arma::mat r_matrix = inv(A)*potential;
@@ -325,18 +341,70 @@ int main(int argc, char **argv){
     A.zeros();
     potential.zeros();
 
+    std::vector<double> c0_vals;
+    std::vector<double> c2_vals;
+    std::vector<double> c4_vals;
+    std::vector<double> c4p_vals;
 
-//  const double INITIAL_C0_VAL = -1.40891e-05;//-213./(M*MPI);
-    std::cout << "Setting up initial search values...\n";
-//  std::vector<double> c0_vals  = {1e-07, 0.8e-07, 1.2e-07, 0.9e-07, 1.1e-07};
-//  std::vector<double> c2_vals  = {1e-06, 0.8e-06, 1.2e-06, 0.9e-06, 1.1e-06, 1.3e-06, 1.4e-06};
-//  std::vector<double> c4_vals  = {10000, 10500, 9500, 9000, 11000};
-//  std::vector<double> c4p_vals = {0.001, 0.0011, 0.0013, 0.0014, 0.0015, 0.0005, 0.0006, 0.0007, 0.0009, 0.0008, 0.0012};
-    std::vector<double> c0_vals  = {1.1e-07};
-    std::vector<double> c2_vals  = {8e-07};
-    std::vector<double> c4_vals  = {10500};
-    std::vector<double> c4p_vals = {0.0014};
+    if (order == "lo"){
+      //parameters for breakdown  = 138
+//      c0_vals  = {-1.48091e-05};
+     
+     // paramaters for cutoff = 983
+//    c0_vals  = {-2.08e-06};
 
+      //parameters for breakdown = 983 pioneft
+      c0_vals = {-1.65e-06};
+      c2_vals  = {0};
+      c4_vals  = {0};
+      c4p_vals = {0};
+    }
+
+    if (order == "nlo"){
+
+      //parameters for breakdown  = 983
+//    c0_vals  = {2560};
+//    c2_vals  = {3e-07};
+
+      //parameters for breakdown  = 138
+//    c0_vals  = {1380};
+//    c2_vals  = {2.85e-05};
+
+      //paramets for breakdown = 69
+//    c0_vals  = {550};
+//    c2_vals  = {0.0001};
+//    Parameaters for breakdown = 35
+//    c0_vals  = {0.1};
+//    c2_vals  = {0.13};
+//    Parameters for breakdown = 2000
+//    c0_vals  = {10000};
+//    c2_vals  = {1e-07};
+
+      //parameters for breakdown = 983 pioneft
+      c0_vals  = {2.4e5};
+      c2_vals  = {2.75e-06};
+      c4_vals  = {0};
+      c4p_vals = {0};
+    }//nlo
+
+    if (order == "nnlo"){
+      //parameters for breakdown  = 138
+//    c0_vals  = {6e-08};
+//    c2_vals  = {1.2e-06};
+//    c4_vals  = {6000};
+//    c4p_vals = {0.0011};
+      //parameters for breakdown = 983
+//    c0_vals  = {9e-06};
+//    c2_vals  = {3e-05};
+//    c4_vals  = {1e5};
+//    c4p_vals = {0};
+
+      //parameters for breakdown = 983 pioneft
+      c0_vals  = {5e-08};
+      c2_vals  = {1.05e-06};
+      c4_vals  = {3.054e6};
+      c4p_vals = {0};
+    }
 
     std::vector<LowEnergyConstants> lec_search;//low energy constants
     std::vector<double> phase_shifts;
@@ -355,30 +423,18 @@ int main(int argc, char **argv){
     double cur_best_eft_phase_shift = 10000;
     LowEnergyConstants best_lecs(0,0,0,0);
 
-    std::cout << "Searching....\n";
     for (auto &lec : lecs){
-//    if (verbose){
-//      std::cout << "Using set: " << lec.c0 << " " << lec.c2 << " " << lec.c4 
-//        << " " << lec.c4p << "\n";
-//    }
-      BuildPotentialMatrix(potential, mesh, k0, pot_type, lec);
+      BuildPotentialMatrix(potential, mesh, k0, pot_type, lec, cutoff);
       BuildAMatrix(A, potential, mesh, k0);
       r_matrix = inv(A)*potential;
       double phase_shift = atan(-M*k0*r_matrix(n,n))*180./PI;
-//    if (verbose){
-//      std::cout << "Phase shift: " << phase_shift << " degrees\n";
-//    }
-//    std::cout << "Best val: " << abs(cur_best_eft_phase_shift-yukawa_phase_shift) 
-//              << " and Current Val: " << abs(phase_shift-yukawa_phase_shift) << "\n";
+
       if (abs(phase_shift - yukawa_phase_shift) < abs(cur_best_eft_phase_shift-yukawa_phase_shift)){
         best_lecs.c0 = lec.c0;
         best_lecs.c2 = lec.c2;
         best_lecs.c4 = lec.c4;
         best_lecs.c4p = lec.c4p;
         cur_best_eft_phase_shift = phase_shift;
-      //std::cout <<  E_lab << " "  << best_lecs.c0 << " " << best_lecs.c2 
-      //  << " " << best_lecs.c4 << " " << best_lecs.c4p << " with phase shift " 
-      //  << phase_shift << " degrees\n";
       }
       std::cout << E_lab << " "  << lec.c0 << " " << lec.c2 << " " << lec.c4 
                 << " " << lec.c4p << " " << phase_shift << "\n";
